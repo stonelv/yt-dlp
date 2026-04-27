@@ -1850,7 +1850,14 @@ def create_parser():
             '"after_move" (after moving the video file to its final location), '
             '"after_video" (after downloading and processing all formats of a video), '
             'or "playlist" (at end of playlist). '
-            'This option can be used multiple times to add different postprocessors'))
+            'This option can be used multiple times to add different postprocessors. '
+            'Built-in postprocessors: '
+            '"OrganizeFiles" organizes downloaded files into directories and maintains a download history database. '
+            'It supports the following arguments: '
+            '"path_template" (output template for directory structure, default: "%(upload_year)s/%(upload_month)s/%(uploader)s"), '
+            '"database_path" (path to JSON history file, default: "download_history.json"), '
+            '"keep_original" (keep original files instead of moving, default: False). '
+            'Example: --use-postprocessor "OrganizeFiles:path_template=%(extractor)s/%(uploader)s;database_path=history.json"'))
 
     sponsorblock = optparse.OptionGroup(parser, 'SponsorBlock Options', description=(
         'Make chapter entries for, or remove various segments (sponsor, introductions, etc.) '
