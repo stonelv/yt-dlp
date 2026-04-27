@@ -81,18 +81,20 @@ class OrganizeFilesPP(PostProcessor):
             self.report_warning('文件不存在，跳过组织')
             return [], info
         
-        tmpl, tmpl_dict = self._downloader.prepare_outtmpl(self.path_template, info, sanitize=True)
-        if tmpl_dict:
-            relative_dir = self._downloader.escape_outtmpl(tmpl) % tmpl_dict
-        else:
-            relative_dir = self.path_template
+        relative_dir = self._downloader.evaluate_outtmpl(self.path_template, info, sanitize=True)
+        if not relative_dir:
+            self.report_warning('路径模板解析结果为空，跳过组织')
+            return [], info
         
         filename = os.path.basename(filepath)
-        base_dir = os.path.dirname(filepath) if os.path.isabs(filepath) else os.getcwd()
-        if not os.path.isabs(filepath):
+        if os.path.isabs(filepath):
+            base_dir = os.path.dirname(filepath)
+        elif os.path.isabs(relative_dir):
+            base_dir = ''
+        else:
             base_dir = os.getcwd()
         
-        target_dir = os.path.join(base_dir, relative_dir)
+        target_dir = os.path.join(base_dir, relative_dir) if base_dir else relative_dir
         target_path = os.path.join(target_dir, filename)
         
         if os.path.abspath(filepath) == os.path.abspath(target_path):
