@@ -1171,3 +1171,216 @@ class FFmpegConcatPP(FFmpegPostProcessor):
             'ext': ie_copy['ext'],
         }]
         return files_to_delete, info
+
+
+class FFmpegLoudnormPP(FFmpegPostProcessor):
+    """
+    Postprocessor for audio loudness normalization using EBU R128 standard.
+    
+    This postprocessor uses FFmpeg's loudnorm filter to normalize audio
+    according to the EBU R128 standard. It performs a two-pass normalization:
+    1. First pass: Measure the audio characteristics
+    2. Second pass: Apply linear normalization based on measured values
+    
+    EBU R128 parameters:
+    - I (Integrated Loudness): Target loudness in LUFS (default: -24.0)
+    - LRA (Loudness Range): Target loudness range (default: 7.0)
+    - TP (True Peak): Maximum true peak level (default: -2.0)
+    """
+
+    DEFAULT_TARGET_LOUDNESS = -24.0
+    DEFAULT_TARGET_LRA = 7.0
+    DEFAULT_TARGET_PEAK = -2.0
+    DEFAULT_DUAL_MONO = False
+
+    def __init__(self, downloader=None, target_loudness=None, target_lra=None,
+                 target_peak=None, dual_mono=None, linear_mode=True):
+        super().__init__(downloader)
+        self.target_loudness = float_or_none(target_loudness) or self.DEFAULT_TARGET_LOUDNESS
+        self.target_lra = float_or_none(target_lra) or self.DEFAULT_TARGET_LRA
+        self.target_peak = float_or_none(target_peak) or self.DEFAULT_TARGET_PEAK
+        self.dual_mono = dual_mono if dual_mono is not None else self.DEFAULT_DUAL_MONO
+        self.linear_mode = linear_mode
+
+    def _get_audio_stream(self, info):
+        """
+        Check if the file has an audio stream.
+        Returns True if audio stream exists, False otherwise.
+        """
+        if info.get('acodec') == 'none':
+            return False
+        filepath = info.get('filepath')
+        if not filepath:
+            return False
+        try:
+            metadata = self.get_metadata_object(filepath)
+            for stream in metadata.get('streams', []):
+                if stream.get('codec_type') == 'audio':
+                    return True
+        except PostProcessingError:
+            pass
+        return False
+
+    def _measure_loudness(self, filepath):
+        """
+        First pass: Measure audio loudness characteristics using loudnorm filter.
+        Returns a dictionary with measured values, or None if measurement fails.
+        """
+        self.to_screen(f'Measuring loudness of "{filepath}"')
+        
+        loudnorm_filter = (
+            f'loudnorm=I={self.target_loudness}:'
+            f'LRA={self.target_lra}:'
+            f'TP={self.target_peak}:'
+            f'print_format=json'
+        )
+        if self.dual_mono:
+            loudnorm_filter += ':dual_mono=true'
+
+        opts = [
+            '-vn',
+            '-af', loudnorm_filter,
+            '-f', 'null',
+            '-'
+        ]
+
+        try:
+            stderr = self.run_ffmpeg(filepath, '-', opts)
+            
+            measured_values = self._parse_loudnorm_output(stderr)
+            if measured_values:
+                self.to_screen(
+                    f'Measured loudness: '
+                    f'I={measured_values["measured_I"]:.2f} LUFS, '
+                    f'LRA={measured_values["measured_LRA"]:.2f}, '
+                    f'TP={measured_values["measured_TP"]:.2f} dB, '
+                    f'Thresh={measured_values["measured_thresh"]:.2f} LUFS'
+                )
+            return measured_values
+        except FFmpegPostProcessorError as e:
+            self.report_warning(f'Failed to measure loudness: {e.msg}')
+            return None
+
+    def _parse_loudnorm_output(self, stderr):
+        """
+        Parse the JSON output from loudnorm filter.
+        Returns a dictionary with measured values, or None if parsing fails.
+        """
+        lines = stderr.splitlines()
+        json_str = None
+        
+        for i, line in enumerate(lines):
+            if '{' in line and '"measured_I"' in line:
+                json_str = line[line.index('{'):]
+                break
+        
+        if not json_str:
+            for i in range(len(lines) - 1, -1, -1):
+                if '{' in lines[i]:
+                    start_idx = lines[i].index('{')
+                    json_lines = []
+                    for j in range(i, len(lines)):
+                        json_lines.append(lines[j][start_idx:] if j == i else lines[j])
+                        if '}' in lines[j]:
+                            break
+                    json_str = ''.join(json_lines)
+                    break
+        
+        if not json_str:
+            return None
+        
+        try:
+            parsed = json.loads(json_str)
+            return {
+                'measured_I': float(parsed.get('input_i', 0)),
+                'measured_LRA': float(parsed.get('input_lra', 0)),
+                'measured_TP': float(parsed.get('input_tp', 0)),
+                'measured_thresh': float(parsed.get('input_thresh', 0)),
+                'measured_offset': float(parsed.get('target_offset', 0))
+            }
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return None
+
+    def _apply_normalization(self, filepath, measured_values, info):
+        """
+        Second pass: Apply linear normalization using measured values.
+        Returns the path to the normalized file.
+        """
+        temp_filename = prepend_extension(filepath, 'temp')
+        ext = determine_ext(filepath)
+        
+        self.to_screen(f'Normalizing audio to I={self.target_loudness} LUFS')
+        
+        loudnorm_filter = (
+            f'loudnorm=I={self.target_loudness}:'
+            f'LRA={self.target_lra}:'
+            f'TP={self.target_peak}:'
+            f'measured_I={measured_values["measured_I"]}:'
+            f'measured_LRA={measured_values["measured_LRA"]}:'
+            f'measured_TP={measured_values["measured_TP"]}:'
+            f'measured_thresh={measured_values["measured_thresh"]}:'
+            f'linear={"true" if self.linear_mode else "false"}'
+        )
+        if self.dual_mono:
+            loudnorm_filter += ':dual_mono=true'
+        
+        opts = [
+            *self.stream_copy_opts(False, ext=ext),
+            '-af', loudnorm_filter,
+        ]
+        if info.get('vcodec') == 'none':
+            opts.append('-vn')
+        
+        self.run_ffmpeg(filepath, temp_filename, opts)
+        
+        return temp_filename
+
+    @PostProcessor._restrict_to(images=False)
+    def run(self, info):
+        """
+        Main entry point for the postprocessor.
+        Performs EBU R128 loudness normalization on the audio.
+        """
+        filepath = info.get('filepath')
+        if not filepath:
+            self.to_screen('No filepath provided, skipping normalization')
+            return [], info
+        
+        if not self._get_audio_stream(info):
+            self.to_screen('No audio stream found, skipping normalization')
+            return [], info
+        
+        measured_values = self._measure_loudness(filepath)
+        if not measured_values:
+            self.report_warning('Failed to measure loudness, skipping normalization')
+            return [], info
+        
+        target_loudness_diff = abs(measured_values['measured_I'] - self.target_loudness)
+        if target_loudness_diff < 0.1:
+            self.to_screen(
+                f'Audio loudness ({measured_values["measured_I"]:.2f} LUFS) '
+                f'is already close to target ({self.target_loudness} LUFS), skipping normalization'
+            )
+            return [], info
+        
+        try:
+            temp_filename = self._apply_normalization(filepath, measured_values, info)
+            
+            orig_filename = prepend_extension(filepath, 'orig')
+            os.replace(filepath, orig_filename)
+            os.replace(temp_filename, filepath)
+            
+            self.to_screen(
+                f'Successfully normalized audio from {measured_values["measured_I"]:.2f} LUFS '
+                f'to {self.target_loudness} LUFS'
+            )
+            
+            return [orig_filename], info
+            
+        except FFmpegPostProcessorError as e:
+            self.report_warning(f'Failed to apply normalization: {e.msg}')
+            if 'temp_filename' in locals() and os.path.exists(temp_filename):
+                os.remove(temp_filename)
+            if 'orig_filename' in locals() and os.path.exists(orig_filename):
+                os.replace(orig_filename, filepath)
+            return [], info
