@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import copy
+import csv
 import datetime as dt
 import errno
 import fileinput
@@ -832,7 +833,7 @@ class YoutubeDL:
 
         def preload_download_archive(fn):
             """Preload the archive, if any is specified"""
-            archive = set()
+            archive = {}
             if fn is None:
                 return archive
             elif not is_path_like(fn):
@@ -842,7 +843,38 @@ class YoutubeDL:
             try:
                 with locked_file(fn, 'r', encoding='utf-8') as archive_file:
                     for line in archive_file:
-                        archive.add(line.strip())
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        if line == 'id,download_time,file_path':
+                            continue
+
+                        if ',' in line:
+                            try:
+                                reader = csv.reader([line])
+                                for row in reader:
+                                    if len(row) >= 1:
+                                        vid_id = row[0].strip()
+                                        if vid_id:
+                                            archive[vid_id] = {
+                                                'download_time': row[1].strip() if len(row) >= 2 else None,
+                                                'file_path': row[2].strip() if len(row) >= 3 else None,
+                                            }
+                            except csv.Error:
+                                vid_id = line
+                                if vid_id:
+                                    archive[vid_id] = {
+                                        'download_time': None,
+                                        'file_path': None,
+                                    }
+                        else:
+                            vid_id = line
+                            if vid_id:
+                                archive[vid_id] = {
+                                    'download_time': None,
+                                    'file_path': None,
+                                }
             except OSError as ioe:
                 if ioe.errno != errno.ENOENT:
                     raise
@@ -3845,11 +3877,33 @@ class YoutubeDL:
         vid_id = self._make_archive_id(info_dict)
         assert vid_id
 
-        self.write_debug(f'Adding to archive: {vid_id}')
+        download_time = dt.datetime.now().isoformat()
+
+        filepath = info_dict.get('filepath')
+        if filepath:
+            try:
+                file_path = os.path.relpath(filepath)
+            except ValueError:
+                file_path = filepath
+        else:
+            file_path = ''
+
+        self.write_debug(f'Adding to archive: {vid_id}, time={download_time}, path={file_path}')
+
         if is_path_like(fn):
+            file_exists = os.path.exists(fn) and os.path.getsize(fn) > 0
+
             with locked_file(fn, 'a', encoding='utf-8') as archive_file:
-                archive_file.write(vid_id + '\n')
-        self.archive.add(vid_id)
+                if not file_exists:
+                    archive_file.write('id,download_time,file_path\n')
+
+                writer = csv.writer(archive_file, lineterminator='\n')
+                writer.writerow([vid_id, download_time, file_path])
+
+        self.archive[vid_id] = {
+            'download_time': download_time,
+            'file_path': file_path,
+        }
 
     @staticmethod
     def format_resolution(format, default='unknown'):
