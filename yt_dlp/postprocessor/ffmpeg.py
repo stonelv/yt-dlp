@@ -1171,3 +1171,94 @@ class FFmpegConcatPP(FFmpegPostProcessor):
             'ext': ie_copy['ext'],
         }]
         return files_to_delete, info
+
+
+class FFmpegSubtitlesBurnerPP(FFmpegPostProcessor):
+    SUPPORTED_VIDEO_EXTS = ('mp4', 'mkv', 'avi', 'mov', 'webm')
+    SUPPORTED_SUB_EXTS = ('srt', 'ass', 'vtt')
+    CHINESE_LANGS = ('zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant', 'cn', 'chi', 'chinese')
+    ENGLISH_LANGS = ('en', 'eng', 'english')
+
+    def __init__(self, downloader=None, languages=None):
+        super().__init__(downloader)
+        self._target_languages = languages or self.CHINESE_LANGS + self.ENGLISH_LANGS
+
+    @PostProcessor._restrict_to(images=False)
+    def run(self, info):
+        if info['ext'] not in self.SUPPORTED_VIDEO_EXTS:
+            self.to_screen(f'Subtitles burning only supported for {", ".join(self.SUPPORTED_VIDEO_EXTS)} files')
+            return [], info
+
+        filename = info['filepath']
+
+        if self._video_has_embedded_subtitles(filename):
+            self.to_screen('Video already has embedded subtitles, skipping burning')
+            return [], info
+
+        subtitle_file = self._find_matching_subtitle(filename)
+        if not subtitle_file:
+            self.to_screen('No matching subtitle file found')
+            return [], info
+
+        self.to_screen(f'Burning subtitles from "{subtitle_file}" into video')
+
+        temp_filename = prepend_extension(filename, 'temp')
+
+        opts = self._build_burn_options(subtitle_file, info['ext'])
+
+        self.run_ffmpeg(filename, temp_filename, opts)
+
+        os.replace(temp_filename, filename)
+
+        return [], info
+
+    def _video_has_embedded_subtitles(self, filepath):
+        try:
+            metadata = self.get_metadata_object(filepath)
+            streams = metadata.get('streams', [])
+            for stream in streams:
+                if stream.get('codec_type') == 'subtitle':
+                    return True
+            return False
+        except Exception as e:
+            self.write_debug(f'Error checking for embedded subtitles: {e}')
+            return False
+
+    def _find_matching_subtitle(self, video_path):
+        video_dir = os.path.dirname(video_path)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+
+        self.write_debug(f'Searching for subtitle file matching "{video_basename}" in "{video_dir}"')
+
+        for ext in self.SUPPORTED_SUB_EXTS:
+            sub_path = os.path.join(video_dir, f'{video_basename}.{ext}')
+            if os.path.exists(sub_path):
+                self.write_debug(f'Found subtitle file (no lang): {sub_path}')
+                return sub_path
+
+        for ext in self.SUPPORTED_SUB_EXTS:
+            for lang in self._target_languages:
+                for lang_variant in (lang, lang.lower(), lang.upper()):
+                    sub_path = os.path.join(video_dir, f'{video_basename}.{lang_variant}.{ext}')
+                    if os.path.exists(sub_path):
+                        self.write_debug(f'Found subtitle file (lang={lang_variant}): {sub_path}')
+                        return sub_path
+
+        return None
+
+    def _build_burn_options(self, subtitle_file, video_ext):
+        sub_ext = determine_ext(subtitle_file)
+
+        opts = ['-map', '0', '-c:a', 'copy']
+
+        escaped_subtitle_path = self._ffmpeg_filename_argument(subtitle_file)
+        escaped_subtitle_path = self._quote_for_ffmpeg(escaped_subtitle_path)
+
+        if sub_ext == 'ass':
+            filter_str = f'ass={escaped_subtitle_path}'
+        else:
+            filter_str = f'subtitles={escaped_subtitle_path}'
+
+        opts.extend(['-vf', filter_str])
+
+        return opts

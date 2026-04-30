@@ -18,6 +18,7 @@ from .ffmpeg import (
     FFmpegMetadataPP,
     FFmpegPostProcessor,
     FFmpegSplitChaptersPP,
+    FFmpegSubtitlesBurnerPP,
     FFmpegSubtitlesConvertorPP,
     FFmpegThumbnailsConvertorPP,
     FFmpegVideoConvertorPP,
