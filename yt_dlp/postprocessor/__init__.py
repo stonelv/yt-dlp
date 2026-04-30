@@ -14,6 +14,7 @@ from .ffmpeg import (
     FFmpegFixupM4aPP,
     FFmpegFixupStretchedPP,
     FFmpegFixupTimestampPP,
+    FFmpegLoudnormPP,
     FFmpegMergerPP,
     FFmpegMetadataPP,
     FFmpegPostProcessor,
