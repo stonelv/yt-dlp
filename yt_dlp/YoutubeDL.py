@@ -842,12 +842,28 @@ class YoutubeDL:
             self.write_debug(f'Loading archive file {fn!r}')
             try:
                 with locked_file(fn, 'r', encoding='utf-8') as archive_file:
+                    first_line = archive_file.readline()
+                    is_csv_header = False
+
+                    if first_line:
+                        first_line_stripped = first_line.strip()
+                        if first_line_stripped and ',' in first_line_stripped:
+                            try:
+                                reader = csv.reader([first_line])
+                                for row in reader:
+                                    if row and len(row) > 0 and row[0].strip().lower() == 'id':
+                                        is_csv_header = True
+                                        self.write_debug(f'Detected CSV header in archive file {fn!r}')
+                                        break
+                            except csv.Error:
+                                pass
+
+                    if not is_csv_header and first_line:
+                        archive_file.seek(0)
+
                     for line in archive_file:
                         line = line.strip()
                         if not line:
-                            continue
-
-                        if line == 'id,download_time,file_path':
                             continue
 
                         if ',' in line:
