@@ -1264,13 +1264,14 @@ class FFmpegLoudnormPP(FFmpegPostProcessor):
     def _parse_loudnorm_output(self, stderr):
         """
         Parse the JSON output from loudnorm filter.
+        FFmpeg loudnorm outputs JSON with fields: input_i, input_lra, input_tp, input_thresh, target_offset
         Returns a dictionary with measured values, or None if parsing fails.
         """
         lines = stderr.splitlines()
         json_str = None
         
         for i, line in enumerate(lines):
-            if '{' in line and '"measured_I"' in line:
+            if '{' in line and '"input_i"' in line:
                 json_str = line[line.index('{'):]
                 break
         
@@ -1301,12 +1302,11 @@ class FFmpegLoudnormPP(FFmpegPostProcessor):
         except (json.JSONDecodeError, ValueError, TypeError):
             return None
 
-    def _apply_normalization(self, filepath, measured_values, info):
+    def _apply_normalization(self, filepath, temp_filename, measured_values, info):
         """
         Second pass: Apply linear normalization using measured values.
-        Returns the path to the normalized file.
+        Only audio is re-encoded; video, subtitles and other streams are copied.
         """
-        temp_filename = prepend_extension(filepath, 'temp')
         ext = determine_ext(filepath)
         
         self.to_screen(f'Normalizing audio to I={self.target_loudness} LUFS')
@@ -1325,15 +1325,19 @@ class FFmpegLoudnormPP(FFmpegPostProcessor):
             loudnorm_filter += ':dual_mono=true'
         
         opts = [
-            *self.stream_copy_opts(False, ext=ext),
+            '-map', '0',
+            '-dn', '-ignore_unknown',
+            '-c:v', 'copy',
             '-af', loudnorm_filter,
         ]
+        if ext in ('mp4', 'mov', 'm4a'):
+            opts.extend(['-c:s', 'mov_text'])
+        else:
+            opts.extend(['-c:s', 'copy'])
         if info.get('vcodec') == 'none':
             opts.append('-vn')
         
         self.run_ffmpeg(filepath, temp_filename, opts)
-        
-        return temp_filename
 
     @PostProcessor._restrict_to(images=False)
     def run(self, info):
@@ -1363,24 +1367,27 @@ class FFmpegLoudnormPP(FFmpegPostProcessor):
             )
             return [], info
         
+        temp_filename = prepend_extension(filepath, 'temp')
+        orig_filename = prepend_extension(filepath, 'orig')
+        files_to_delete = []
+        
         try:
-            temp_filename = self._apply_normalization(filepath, measured_values, info)
+            self._apply_normalization(filepath, temp_filename, measured_values, info)
             
-            orig_filename = prepend_extension(filepath, 'orig')
             os.replace(filepath, orig_filename)
             os.replace(temp_filename, filepath)
+            files_to_delete = [orig_filename]
             
             self.to_screen(
                 f'Successfully normalized audio from {measured_values["measured_I"]:.2f} LUFS '
                 f'to {self.target_loudness} LUFS'
             )
-            
-            return [orig_filename], info
-            
         except FFmpegPostProcessorError as e:
             self.report_warning(f'Failed to apply normalization: {e.msg}')
-            if 'temp_filename' in locals() and os.path.exists(temp_filename):
-                os.remove(temp_filename)
-            if 'orig_filename' in locals() and os.path.exists(orig_filename):
+            if os.path.exists(temp_filename):
+                self._delete_downloaded_files(temp_filename, msg=None)
+            if os.path.exists(orig_filename):
                 os.replace(orig_filename, filepath)
             return [], info
+        
+        return files_to_delete, info

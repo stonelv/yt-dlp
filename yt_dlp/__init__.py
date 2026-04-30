@@ -669,6 +669,14 @@ def get_postprocessors(opts):
             'key': 'FFmpegVideoConvertor',
             'preferedformat': opts.recodevideo,
         }
+    if opts.normalizeloudness:
+        yield {
+            'key': 'FFmpegLoudnorm',
+            'target_loudness': opts.targetloudness,
+            'target_lra': opts.targetlra,
+            'target_peak': opts.targetpeak,
+            'dual_mono': opts.dualmono,
+        }
     # If ModifyChapters is going to remove chapters, subtitles must already be in the container.
     if opts.embedsubtitles:
         keep_subs = 'no-keep-subs' not in opts.compat_opts

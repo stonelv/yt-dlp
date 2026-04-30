@@ -1640,6 +1640,43 @@ def create_parser():
         metavar='FORMAT', dest='recodevideo', default=None,
         help='Re-encode the video into another format if necessary. The syntax and supported formats are the same as --remux-video')
     postproc.add_option(
+        '--normalize-loudness', '--loudnorm',
+        action='store_true', dest='normalizeloudness', default=False,
+        help=(
+            'Normalize audio loudness using EBU R128 standard. '
+            'This performs a two-pass linear normalization to ensure consistent volume across different videos. '
+            'Use --target-loudness, --target-lra, and --target-peak to customize the normalization parameters. '
+            '(Alias: --loudnorm)'))
+    postproc.add_option(
+        '--target-loudness',
+        metavar='LUFS', dest='targetloudness', default='-24.0',
+        help=(
+            'Target integrated loudness in LUFS for loudness normalization. '
+            'Range: -70.0 to -5.0. Default is -24.0 LUFS (EBU R128 broadcast standard). '
+            'Common values: -16 LUFS for streaming platforms, -24 LUFS for broadcast'))
+    postproc.add_option(
+        '--target-lra',
+        metavar='LU', dest='targetlra', default='7.0',
+        help=(
+            'Target loudness range in LU for loudness normalization. '
+            'Range: 1.0 to 50.0. Default is 7.0 LU. '
+            'Higher values preserve more dynamic range, lower values make volume more consistent'))
+    postproc.add_option(
+        '--target-peak',
+        metavar='dB', dest='targetpeak', default='-2.0',
+        help=(
+            'Maximum true peak level in dB for loudness normalization. '
+            'Range: -9.0 to +0.0. Default is -2.0 dB. '
+            'This prevents clipping by limiting the maximum peak level'))
+    postproc.add_option(
+        '--dual-mono',
+        action='store_true', dest='dualmono', default=False,
+        help=(
+            'Treat mono audio as dual-mono during loudness normalization. '
+            'If a mono file is intended for playback on a stereo system, its EBU R128 measurement '
+            'will be perceptually incorrect. This option compensates for this effect. '
+            'Multi-channel audio is not affected'))
+    postproc.add_option(
         '--postprocessor-args', '--ppa',
         metavar='NAME:ARGS', dest='postprocessor_args', default={}, type='str',
         action='callback', callback=_dict_from_options_callback,
@@ -1654,7 +1691,7 @@ def create_parser():
             'to give the argument to the specified postprocessor/executable. Supported PP are: '
             'Merger, ModifyChapters, SplitChapters, ExtractAudio, VideoRemuxer, VideoConvertor, '
             'Metadata, EmbedSubtitle, EmbedThumbnail, SubtitlesConvertor, ThumbnailsConvertor, '
-            'FixupStretched, FixupM4a, FixupM3u8, FixupTimestamp and FixupDuration. '
+            'FixupStretched, FixupM4a, FixupM3u8, FixupTimestamp, FixupDuration and Loudnorm. '
             'The supported executables are: AtomicParsley, FFmpeg and FFprobe. '
             'You can also specify "PP+EXE:ARGS" to give the arguments to the specified executable '
             'only when being used by the specified postprocessor. Additionally, for ffmpeg/ffprobe, '
