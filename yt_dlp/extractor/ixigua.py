@@ -85,7 +85,7 @@ class IxiguaBaseIE(InfoExtractor):
     def _get_json_data(self, webpage, video_id):
         js_data = get_element_by_id('SSR_HYDRATED_DATA', webpage)
         if not js_data:
-            if self._cookies_passed:
+            if self._get_cookies(f'https://{self._IXIGUA_DOMAIN}').get('ttwid'):
                 raise ExtractorError('Failed to get SSR_HYDRATED_DATA')
             raise ExtractorError('Cookies (not necessarily logged in) are needed', expected=True)
 
@@ -96,7 +96,7 @@ class IxiguaBaseIE(InfoExtractor):
 class IxiguaIE(IxiguaBaseIE):
     IE_NAME = 'ixigua'
     IE_DESC = '西瓜视频 (ixigua.com)'
-    _VALID_URL = r'https?://(?:\w+\.)?ixigua\.com/(?:video/)?(?P<id>\d+).+'
+    _VALID_URL = r'https?://(?:\w+\.)?ixigua\.com/(?:video/)?(?P<id>\d+)[^/?#]*'
     _TESTS = [{
         'url': 'https://www.ixigua.com/6996881461559165471',
         'info_dict': {
@@ -114,38 +114,68 @@ class IxiguaIE(IxiguaBaseIE):
             'timestamp': 1629088414,
             'duration': 1030,
         },
+    }, {
+        'url': 'https://www.ixigua.com/video/6996881461559165471',
+        'only_matching': True,
+    }, {
+        'url': 'https://m.ixigua.com/6996881461559165471',
+        'only_matching': True,
     }]
 
     def _real_extract(self, url):
         video_id = self._match_id(url)
         webpage = self._download_webpage(url, video_id)
-        json_data = self._get_json_data(webpage, video_id)['anyVideo']['gidInformation']['packerData']['video']
+        json_data = self._get_json_data(webpage, video_id)
 
-        formats = list(self._media_selector(json_data.get('videoResource')))
-        self._sort_formats(formats)
-
-        subtitles = self._extract_subtitles(json_data)
-
-        thumbnail = traverse_obj(json_data, (
-            'videoResource', 'poster_url',
-            'poster_url',
+        video_info = traverse_obj(json_data, (
+            'anyVideo', 'gidInformation', 'packerData', 'video',
+            ('anyVideo', 'videoResource', 'video_info'),
         ), get_all=False)
 
-        uploader_info = json_data.get('user_info') or {}
+        if not video_info:
+            raise ExtractorError('Unable to extract video information')
+
+        video_resource = traverse_obj(video_info, (
+            'videoResource',
+            ('anyVideo', 'videoResource'),
+        ), get_all=False) or video_info
+
+        formats = []
+        if video_resource:
+            formats = list(self._media_selector(video_resource))
+        self._sort_formats(formats)
+
+        subtitles = self._extract_subtitles(video_info)
+
+        tags = []
+        tag = video_info.get('tag')
+        if tag:
+            tags.append(tag)
+
+        thumbnail = traverse_obj(video_info, (
+            'poster_url',
+            'videoResource', 'poster_url',
+            'user_info', 'avatar_url',
+        ), get_all=False)
+
+        uploader_info = traverse_obj(video_info, (
+            'user_info',
+            'creator_info',
+        ), get_all=False) or {}
 
         return {
             'id': video_id,
-            'title': json_data.get('title'),
-            'description': json_data.get('video_abstract'),
+            'title': video_info.get('title') or video_id,
+            'description': video_info.get('video_abstract') or video_info.get('description'),
             'formats': formats,
-            'like_count': json_data.get('video_like_count'),
-            'duration': int_or_none(json_data.get('duration')),
-            'tags': [json_data.get('tag')],
-            'uploader_id': traverse_obj(json_data, ('user_info', 'user_id')),
-            'uploader': traverse_obj(json_data, ('user_info', 'name')),
-            'view_count': json_data.get('video_watch_count'),
-            'dislike_count': json_data.get('video_unlike_count'),
-            'timestamp': int_or_none(json_data.get('video_publish_time')),
+            'like_count': int_or_none(video_info.get('video_like_count')),
+            'duration': int_or_none(video_info.get('duration')),
+            'tags': tags,
+            'uploader_id': str_or_none(uploader_info.get('user_id')),
+            'uploader': uploader_info.get('name') or uploader_info.get('nickname'),
+            'view_count': int_or_none(video_info.get('video_watch_count')),
+            'dislike_count': int_or_none(video_info.get('video_unlike_count')),
+            'timestamp': int_or_none(video_info.get('video_publish_time')),
             'thumbnail': url_or_none(thumbnail),
             'subtitles': subtitles,
         }
