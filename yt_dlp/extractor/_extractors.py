@@ -885,7 +885,10 @@ from .iwara import (
     IwaraPlaylistIE,
     IwaraUserIE,
 )
-from .ixigua import IxiguaIE
+from .ixigua import (
+    IxiguaIE,
+    IxiguaShortIE,
+)
 from .izlesene import IzleseneIE
 from .jamendo import (
     JamendoAlbumIE,
