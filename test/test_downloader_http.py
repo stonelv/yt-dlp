@@ -31,10 +31,14 @@ class HTTPTestRequestHandler(http.server.BaseHTTPRequestHandler):
         range_header = self.headers.get('Range')
         start = end = None
         if range_header:
-            mobj = re.search(r'^bytes=(\d+)-(\d+)', range_header)
+            mobj = re.search(r'^bytes=(\d+)-(\d*)', range_header)
             if mobj:
                 start = int(mobj.group(1))
-                end = int(mobj.group(2))
+                end_str = mobj.group(2)
+                if end_str:
+                    end = int(end_str)
+                else:
+                    end = TEST_SIZE - 1
         valid_range = start is not None and end is not None
         if valid_range:
             content_range = f'bytes {start}-{end}'
@@ -82,11 +86,15 @@ class TestHttpFD(unittest.TestCase):
         downloader = HttpFD(ydl, params)
         filename = 'testfile.mp4'
         try_rm(filename)
+        try_rm(filename + '.part')
+        try_rm(filename + '.ytdl')
         self.assertTrue(downloader.real_download(filename, {
             'url': f'http://127.0.0.1:{self.port}/{ep}',
         }), ep)
         self.assertEqual(os.path.getsize(filename), TEST_SIZE, ep)
         try_rm(filename)
+        try_rm(filename + '.part')
+        try_rm(filename + '.ytdl')
 
     def download_all(self, params):
         for ep in ('regular', 'no-content-length', 'no-range', 'no-range-no-content-length'):
@@ -99,6 +107,24 @@ class TestHttpFD(unittest.TestCase):
         self.download_all({
             'http_chunk_size': 1000,
         })
+
+    def test_parallel_chunked(self):
+        self.download({
+            'http_chunk_size': 2000,
+            'concurrent_fragment_downloads': 4,
+        }, 'regular')
+
+    def test_parallel_chunked_small(self):
+        self.download({
+            'http_chunk_size': 1000,
+            'concurrent_fragment_downloads': 8,
+        }, 'regular')
+
+    def test_parallel_chunked_single(self):
+        self.download({
+            'http_chunk_size': TEST_SIZE,
+            'concurrent_fragment_downloads': 4,
+        }, 'regular')
 
 
 if __name__ == '__main__':
