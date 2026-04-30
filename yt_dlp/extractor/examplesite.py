@@ -1,6 +1,9 @@
+import re
+
 from .common import InfoExtractor
 from ..utils import (
     ExtractorError,
+    determine_ext,
     int_or_none,
     parse_duration,
     str_or_none,
@@ -232,13 +235,11 @@ class ExampleSiteUserIE(InfoExtractor):
                     traverse_obj(initial_state, ('user', 'videos', 'items', ..., {dict}))
         
         if not videos:
-            video_elements = self._search_regex(
-                r'(?s)<a[^>]+href=["\'](/video/[^"\']+)["\']',
-                webpage, 'video links', default=[], flags=re.MULTILINE
-            )
-            if video_elements:
-                for link in set(video_elements):
-                    videos.append({'id': link.split('/')[-1]})
+            for mobj in re.finditer(
+                    r'<a[^>]+href=["\'](/video/[^"\'>]+)["\'>]',
+                    webpage):
+                link = mobj.group(1)
+                videos.append({'id': link.split('/')[-1]})
         
         return videos
     
@@ -254,10 +255,3 @@ class ExampleSiteUserIE(InfoExtractor):
             return video_url
         
         return None
-
-
-def determine_ext(url):
-    if not url:
-        return None
-    from ..utils import determine_ext as utils_determine_ext
-    return utils_determine_ext(url)
