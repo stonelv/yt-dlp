@@ -590,6 +590,10 @@ from .europa import (
 from .europeantour import EuropeanTourIE
 from .eurosport import EurosportIE
 from .euscreen import EUScreenIE
+from .examplesite import (
+    ExampleSiteIE,
+    ExampleSiteUserIE,
+)
 from .expressen import ExpressenIE
 from .eyedotv import EyedoTVIE
 from .facebook import (
