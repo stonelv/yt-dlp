@@ -1179,9 +1179,12 @@ class FFmpegSubtitlesBurnerPP(FFmpegPostProcessor):
     CHINESE_LANGS = ('zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant', 'cn', 'chi', 'chinese')
     ENGLISH_LANGS = ('en', 'eng', 'english')
 
-    def __init__(self, downloader=None, languages=None):
+    def __init__(self, downloader=None, languages=None, video_codec='libx264', crf=23, preset='medium'):
         super().__init__(downloader)
         self._target_languages = languages or self.CHINESE_LANGS + self.ENGLISH_LANGS
+        self._video_codec = video_codec
+        self._crf = crf
+        self._preset = preset
 
     @PostProcessor._restrict_to(images=False)
     def run(self, info):
@@ -1195,7 +1198,7 @@ class FFmpegSubtitlesBurnerPP(FFmpegPostProcessor):
             self.to_screen('Video already has embedded subtitles, skipping burning')
             return [], info
 
-        subtitle_file = self._find_matching_subtitle(filename)
+        subtitle_file = self._find_matching_subtitle(filename, info)
         if not subtitle_file:
             self.to_screen('No matching subtitle file found')
             return [], info
@@ -1224,17 +1227,26 @@ class FFmpegSubtitlesBurnerPP(FFmpegPostProcessor):
             self.write_debug(f'Error checking for embedded subtitles: {e}')
             return False
 
-    def _find_matching_subtitle(self, video_path):
+    def _find_matching_subtitle(self, video_path, info):
         video_dir = os.path.dirname(video_path)
         video_basename = os.path.splitext(os.path.basename(video_path))[0]
 
         self.write_debug(f'Searching for subtitle file matching "{video_basename}" in "{video_dir}"')
 
-        for ext in self.SUPPORTED_SUB_EXTS:
-            sub_path = os.path.join(video_dir, f'{video_basename}.{ext}')
-            if os.path.exists(sub_path):
-                self.write_debug(f'Found subtitle file (no lang): {sub_path}')
-                return sub_path
+        requested_subtitles = info.get('requested_subtitles') or {}
+        if requested_subtitles:
+            self.write_debug(f'Found requested_subtitles: {list(requested_subtitles.keys())}')
+            for lang in self._target_languages:
+                lang_lower = lang.lower()
+                for sub_lang, sub_info in requested_subtitles.items():
+                    sub_lang_lower = sub_lang.lower()
+                    if (lang_lower == sub_lang_lower or 
+                        lang_lower.startswith(sub_lang_lower) or 
+                        sub_lang_lower.startswith(lang_lower)):
+                        sub_path = sub_info.get('filepath')
+                        if sub_path and os.path.exists(sub_path):
+                            self.write_debug(f'Found subtitle from requested_subtitles (lang={sub_lang}): {sub_path}')
+                            return sub_path
 
         for ext in self.SUPPORTED_SUB_EXTS:
             for lang in self._target_languages:
@@ -1249,7 +1261,13 @@ class FFmpegSubtitlesBurnerPP(FFmpegPostProcessor):
     def _build_burn_options(self, subtitle_file, video_ext):
         sub_ext = determine_ext(subtitle_file)
 
-        opts = ['-map', '0', '-c:a', 'copy']
+        opts = ['-map', '0']
+
+        opts.extend(['-c:v', self._video_codec])
+        opts.extend(['-crf', str(self._crf)])
+        opts.extend(['-preset', self._preset])
+
+        opts.extend(['-c:a', 'copy'])
 
         escaped_subtitle_path = self._ffmpeg_filename_argument(subtitle_file)
         escaped_subtitle_path = self._quote_for_ffmpeg(escaped_subtitle_path)
