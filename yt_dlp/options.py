@@ -1010,7 +1010,8 @@ def create_parser():
     downloader.add_option(
         '-N', '--concurrent-fragments',
         dest='concurrent_fragment_downloads', metavar='N', default=1, type=int,
-        help='Number of fragments of a dash/hlsnative video that should be downloaded concurrently (default is %default)')
+        help='Number of fragments of a dash/hlsnative video that should be downloaded concurrently (default is %default). '
+             'When used with --http-chunk-size, also enables parallel downloading of HTTP files')
     downloader.add_option(
         '-r', '--limit-rate', '--rate-limit',
         dest='ratelimit', metavar='RATE',
@@ -1077,7 +1078,8 @@ def create_parser():
         dest='http_chunk_size', metavar='SIZE', default=None,
         help=(
             'Size of a chunk for chunk-based HTTP downloading, e.g. 10485760 or 10M (default is disabled). '
-            'May be useful for bypassing bandwidth throttling imposed by a webserver (experimental)'))
+            'May be useful for bypassing bandwidth throttling imposed by a webserver (experimental). '
+            'When used with --concurrent-fragments, enables parallel downloading of multiple chunks'))
     downloader.add_option(
         '--test',
         action='store_true', dest='test', default=False,
